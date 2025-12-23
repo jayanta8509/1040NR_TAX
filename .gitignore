@@ -1,0 +1,13 @@
+.env
+env
+.venv
+venv
+/venv
+__pycache__
+
+smarttaxgudie.bestworks.cloud
+191.101.0.166
+/home/bestworks-smarttaxgudie/htdocs/smarttaxgudie.bestworks.cloud
+
+
+nohup uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4 > app.log 2>&1 &  
