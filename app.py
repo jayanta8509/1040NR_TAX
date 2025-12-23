@@ -7,6 +7,8 @@ import time
 import os
 from typing import Optional
 from process import TaxProcessingWorkflow
+# Import the function from mcp_functions
+from welcome_message import get_client_welcome_message
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +36,11 @@ class TaxWorkflowRequest(BaseModel):
     reference: str = "individual"  # "company" or "individual"
     human_response: Optional[str] = None  # None for first call, user's answer for subsequent calls
 
+
+class WelcomeMessageRequest(BaseModel):
+    user_id: str
+    client_id: str  # str primary key
+    reference: str  # "company" or "individual"
 
 @app.post("/tax/workflow")
 async def tax_workflow_endpoint(request: TaxWorkflowRequest):
@@ -125,6 +132,46 @@ async def tax_workflow_endpoint(request: TaxWorkflowRequest):
         logger.error(f"Error in tax workflow: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error in tax workflow: {str(e)}")
 
+
+@app.post("/welcome/message")
+async def get_welcome_message_endpoint(request: WelcomeMessageRequest):
+    """
+    Get the welcome message for a client
+    """
+    try:
+        logger.info(f"Received welcome message request for user {request.user_id}, client_id {request.client_id}")
+
+        if not request.user_id or request.user_id.strip() == "":
+            raise HTTPException(status_code=400, detail="User ID cannot be empty")
+
+        if not request.client_id:
+            raise HTTPException(status_code=400, detail="Client ID cannot be empty")
+
+        if not request.reference or request.reference.strip() == "":
+            raise HTTPException(status_code=400, detail="Reference cannot be empty")
+
+        if request.reference.lower() not in ["company", "individual"]:
+            raise HTTPException(status_code=400, detail="Reference must be 'company' or 'individual'")
+
+
+
+        # Get the welcome message
+        welcome_message = get_client_welcome_message(
+            client_id=request.client_id,
+            reference=request.reference.lower()
+        )
+
+        logger.info(f"Successfully processed welcome message for user {request.user_id}")
+        return {
+            "response": welcome_message,
+            "status_code": 200,
+            "timestamp": time.time(),
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error processing welcome message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing welcome message: {str(e)}")
 
 @app.get("/")
 async def root():
