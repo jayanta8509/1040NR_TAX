@@ -99,62 +99,105 @@ class TaxProcessingWorkflow:
             prev_question = questions[current_index - 1]
             prev_ai_response = progress.get("last_ai_response", "")
             
-            # Validate if user wants to update
-            print(f"🔍 Validating user response...")
-            validation_result = await validation_identification(
-                Question=prev_question,
-                AI_agent_rsponce=prev_ai_response,
-                human_responce=human_response
-            )
+            # Check if this is the last question
+            is_last_question = (current_index == len(questions))
             
-            wants_to_update = validation_result.validation_indenty
-            validation_wants_update = wants_to_update
-            print(f"📊 Validation result: {'UPDATE' if wants_to_update else 'KEEP'}")
-            
-            # Save the answer
-            if "answers" not in progress:
-                progress["answers"] = {}
-            
-            progress["answers"][f"question_{current_index - 1}"] = {
-                "question": prev_question,
-                "ai_response": prev_ai_response,
-                "human_response": human_response,
-                "wants_update": wants_to_update,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            if wants_to_update:
-                # User wants to update, ask the human_response as a question
-                print(f"🔄 User wants to update information, asking human response as question")
+            if is_last_question:
+                # For the last question, just process the answer without validation
+                print(f"📝 Processing final answer for last question...")
                 
+                # Save the answer
+                if "answers" not in progress:
+                    progress["answers"] = {}
+                
+                progress["answers"][f"question_{current_index - 1}"] = {
+                    "question": prev_question,
+                    "ai_response": prev_ai_response,
+                    "human_response": human_response,
+                    "wants_update": False,  # No validation for last question
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Mark as completed
+                if current_index - 1 not in progress["completed_questions"]:
+                    progress["completed_questions"].append(current_index - 1)
+                
+                # Ask the AI to acknowledge the final answer
                 ai_response = await ask_question(
-                    question=human_response,  # Ask the human response as the question
+                    question=human_response,
                     user_id=self.user_id,
                     client_id=self.client_id,
                     reference=self.reference
                 )
                 
-                # Save the AI response but don't increment question index
+                # Save and mark as completed
                 progress["last_ai_response"] = ai_response
                 self.save_progress(progress)
                 
                 return {
-                    "status": "in_progress",
-                    "question_number": current_index,  # Same question number
+                    "status": "completed",
+                    "message": "🎉 All questions have been completed!",
                     "total_questions": len(questions),
-                    "question": human_response,  # The human response becomes the question
-                    "ai_response": ai_response,
-                    "completed": len(progress["completed_questions"]),
-                    "validation_result": True  # User wants to update
+                    "completed_questions": len(progress["completed_questions"]),
+                    "final_response": ai_response  # Include AI's final acknowledgment
                 }
             else:
-                # User confirmed, mark as completed and move to next
-                if current_index - 1 not in progress["completed_questions"]:
-                    progress["completed_questions"].append(current_index - 1)
-                # Move to next question
-                current_index = progress.get("current_question_index", 0)
+                # Not the last question - validate normally
+                print(f"🔍 Validating user response...")
+                validation_result = await validation_identification(
+                    Question=prev_question,
+                    AI_agent_rsponce=prev_ai_response,
+                    human_responce=human_response
+                )
+                
+                wants_to_update = validation_result.validation_indenty
+                validation_wants_update = wants_to_update
+                print(f"📊 Validation result: {'UPDATE' if wants_to_update else 'KEEP'}")
+                
+                # Save the answer
+                if "answers" not in progress:
+                    progress["answers"] = {}
+                
+                progress["answers"][f"question_{current_index - 1}"] = {
+                    "question": prev_question,
+                    "ai_response": prev_ai_response,
+                    "human_response": human_response,
+                    "wants_update": wants_to_update,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                if wants_to_update:
+                    # User wants to update, ask the human_response as a question
+                    print(f"🔄 User wants to update information, asking human response as question")
+                    
+                    ai_response = await ask_question(
+                        question=human_response,  # Ask the human response as the question
+                        user_id=self.user_id,
+                        client_id=self.client_id,
+                        reference=self.reference
+                    )
+                    
+                    # Save the AI response but don't increment question index
+                    progress["last_ai_response"] = ai_response
+                    self.save_progress(progress)
+                    
+                    return {
+                        "status": "in_progress",
+                        "question_number": current_index,  # Same question number
+                        "total_questions": len(questions),
+                        "question": human_response,  # The human response becomes the question
+                        "ai_response": ai_response,
+                        "completed": len(progress["completed_questions"]),
+                        "validation_result": True  # User wants to update
+                    }
+                else:
+                    # User confirmed, mark as completed and move to next
+                    if current_index - 1 not in progress["completed_questions"]:
+                        progress["completed_questions"].append(current_index - 1)
+                    # Move to next question
+                    current_index = progress.get("current_question_index", 0)
         
-        # Check if all questions are completed
+        # Check if all questions are completed (shouldn't reach here after last question)
         if current_index >= len(questions):
             self.save_progress(progress)
             return {
