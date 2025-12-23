@@ -111,6 +111,7 @@ async def tax_workflow_endpoint(request: TaxWorkflowRequest):
                 "message": result.get("message"),
                 "total_questions": result.get("total_questions"),
                 "completed_questions": result.get("completed_questions"),
+                "final_response": result.get("final_response"),  # AI's final acknowledgment
                 "timestamp": time.time()
             }
         
