@@ -14,9 +14,9 @@ class validation(BaseModel):
 
 
 model = ChatOpenAI(
-    model="gpt-5-mini",
+    model="gpt-4o-mini",
     temperature=0.5,
-    timeout=20
+    timeout=10
 )
 agent = create_agent(model, 
                   response_format=ToolStrategy(validation), 
@@ -130,9 +130,9 @@ Based on the full context above, determine if the user wants to UPDATE the infor
     ans = result["structured_response"]
     return ans
 
-if __name__ == "__main__":
-    question = "Confirm your full legal name (first, middle, last) as it appears on your passport or official documents."
-    AI_responce = "I see you already provided \"Alex test.\" Let me confirm: Is \"Alex test\" your full legal name (first, middle, last) as it appears on your passport or other official documents?"
-    human_responce = "yes it is correct"
-    output = asyncio.run(validation_identification(question, AI_responce, human_responce))
-    print(output.validation_indenty)
+# if __name__ == "__main__":
+#     question = "Confirm your full legal name (first, middle, last) as it appears on your passport or official documents."
+#     AI_responce = "I see you already provided \"Alex test.\" Let me confirm: Is \"Alex test\" your full legal name (first, middle, last) as it appears on your passport or other official documents?"
+#     human_responce = "yes it is correct"
+#     output = asyncio.run(validation_identification(question, AI_responce, human_responce))
+#     print(output.validation_indenty)

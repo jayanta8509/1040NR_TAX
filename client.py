@@ -129,7 +129,7 @@ async def get_or_create_agent():
                 tools = await _mcp_client.get_tools()
                 print(f"✅ Got {len(tools)} tools from MCP server")
                 
-                model = ChatOpenAI(model="gpt-4o-mini")
+                model = ChatOpenAI(model="gpt-4o-mini", timeout=20)
                 _agent = create_agent(model, tools)
                 
                 print("✅ MCP client and agent initialized successfully")
@@ -301,7 +301,7 @@ async def get_or_create_agent():
                 tools = await _mcp_client.get_tools()
                 print(f"✅ Got {len(tools)} tools from MCP server")
                 
-                model = ChatOpenAI(model="gpt-5-mini")
+                model = ChatOpenAI(model="gpt-4o-mini", timeout=20)
                 _agent = create_agent(model, tools)
                 
                 print("✅ MCP client and agent initialized successfully")
@@ -478,19 +478,67 @@ async def ask_question(question, style_preference=None, user_id="default_user", 
        - Just answer the question naturally
        - One question at a time
 
-    **AVAILABLE MCP TOOLS:**
+    **AVAILABLE MCP TOOLS (17 GET / 11 UPDATE):**
 
-    📋 **Get Information:**
-    - get_client_basic_profile(client_id, reference) → name, email, ITIN, filing status
-    - get_client_primary_contact(client_id, reference) → address, phone, email
-    - get_individual_identity_and_tax_id(client_id, reference) → name, DOB, ITIN, citizenship
-    - get_individual_residency_and_citizenship(client_id, reference) → country of residence/citizenship
-    - get_client_services_overview(client_id, reference) → occupation, income source
+    📋 **BASIC PROFILE (5 GET functions):**
+    1. get_client_full_legal_name(practice_id, reference) → full_legal_name
+    2. get_client_date_of_birth(practice_id, reference) → date_of_birth  
+    3. get_client_current_us_address(practice_id, reference) → address1, address2, city, state, zip, country
+    4. get_client_occupation_and_us_income_source(practice_id, reference) → occupation, source_of_us_income
+    5. get_client_itin_number(practice_id, reference) → itin
 
-    💾 **Update Information (when user wants to change):**
-    - update_individual_identity_and_tax_id() → update name, DOB, ITIN, filing status
-    - update_client_primary_contact_info() → update address, contact details
-    - update_client_occupation_and_income_source() → update occupation
+    🛂 **PASSPORT & VISA (2 GET functions):**
+    6. get_individual_passport_details(practice_id, reference) → passport_number, passport_country, passport_expiry
+    7. get_individual_visa_details(practice_id, reference) → visa_type, visa_issue_country
+
+    ✈️ **US PRESENCE (2 GET functions):**
+    8. get_individual_us_entry_exit_dates(practice_id, reference) → first_entry_date_us, last_exit_date_us
+    9. get_individual_days_in_us(practice_id, reference) → days_in_us_current_year, days_in_us_prev_year, days_in_us_prev2_years
+
+    📜 **TREATY CLAIMS (1 GET function):**
+    10. get_individual_treaty_claim_details(practice_id, reference) → treaty_claimed, treaty_country, treaty_article, treaty_income_type, treaty_exempt_amount, resident_of_treaty_country
+
+    💰 **INCOME (1 GET function):**
+    11. get_individual_income_amounts(practice_id, reference) → w2_wages_amount, scholarship_1042s_amount, interest_amount, dividend_amount, capital_gains_amount, rental_income_amount, self_employment_eci_amount
+
+    � **WITHHOLDING (1 GET function):**
+    12. get_individual_withholding_amounts(practice_id, reference) → federal_withholding_w2, federal_withholding_1042s, tax_withheld_1099
+
+    📄 **DOCUMENTS (1 GET function):**
+    13. get_individual_document_flags(practice_id, reference) → has_w2, has_1042s, has_1099, has_k1
+
+    📊 **DEDUCTIONS (1 GET function):**
+    14. get_individual_itemized_deductions(practice_id, reference) → itemized_state_local_tax, itemized_charity, itemized_casualty_losses
+
+    💾 **UPDATE FUNCTIONS (11 total):**
+    - update_individual_identity_and_tax_id() → name, DOB, ITIN, filing_status, citizenship, residence
+    - update_client_primary_contact_info() → address, phone, email
+    - update_client_occupation_and_income_source() → occupation, source_of_us_income
+    - update_individual_passport_and_visa() → passport & visa details
+    - update_individual_us_presence() → entry/exit dates, days in US
+    - update_individual_treaty_details() → treaty claim information
+    - update_individual_income_amounts() → all income amounts
+    - update_individual_withholding() → withholding amounts
+    - update_individual_forms_flags() → document availability flags
+    - update_individual_deductions_and_education() → deductions & education
+    - get_master_languages_and_countries() → lookup tables for IDs
+
+    **AUTOMATIC FUNCTION SELECTION:**
+    Based on the question keywords, automatically use the correct GET function:
+    - "name" → get_client_full_legal_name
+    - "birth" or "DOB" → get_client_date_of_birth
+    - "address" or "city" or "state" or "zip" → get_client_current_us_address
+    - "occupation" or "profession" → get_client_occupation_and_us_income_source
+    - "ITIN" → get_client_itin_number
+    - "passport" → get_individual_passport_details
+    - "visa" → get_individual_visa_details
+    - "entry" or "exit" → get_individual_us_entry_exit_dates
+    - "days in US" → get_individual_days_in_us
+    - "treaty" → get_individual_treaty_claim_details
+    - "W-2" or "wages" or "income" → get_individual_income_amounts
+    - "withholding" → get_individual_withholding_amounts
+    - "form" or "document" → get_individual_document_flags
+    - "deduction" or "charity" → get_individual_itemized_deductions
 
     **RESPONSE EXAMPLES:**
 
@@ -586,12 +634,12 @@ async def get_recent_context(user_id: str) -> str:
         return ""
 
 
-if __name__ == "__main__":
-    answer = asyncio.run(ask_question(
-                question="Confirm your full legal name (first, middle, last) as it appears on your passport or official documents.", 
-                user_id="jayana34y5",
-                client_id="TESTDEM1",  
-                reference="individual"
-            ))
+# if __name__ == "__main__":
+#     answer = asyncio.run(ask_question(
+#                 question="Confirm your full legal name (first, middle, last) as it appears on your passport or official documents.", 
+#                 user_id="jayana34y5",
+#                 client_id="TESTDEM1",  
+#                 reference="individual"
+#             ))
 
-    print(answer)
+#     print(answer)
