@@ -1800,48 +1800,95 @@ def update_individual_refund_method(
     """
     Purpose:
         Update the refund method for an individual.
-
-    Updates (individual table):
-        - refund_method
-
+ 
+    Allowed refund methods:
+        - 'check'
+        - 'ACH' (default fallback)
     Args:
         practice_id (str), reference (str)
         refund_method (str | None): 'check' or 'ACH'
-
+ 
+    Behavior:
+        - If an invalid refund_method is provided, the system:
+            * Returns an error message
+            * Stores 'ACH' as the refund_method
+            * Returns available methods in response
+ 
+    Updates (individual table):
+        - refund_method
+ 
     Returns:
-        dict with updated values only.
+        dict with updated value + available methods
     """
-    if (reference or "").lower().strip() != "individual":
-        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
-                "success": False, "rows_affected": 0, "updated": {},
-                "message": "Only supports reference='individual'."}
-
+ 
+    AVAILABLE_METHODS = ["check", "ACH"]
+    DEFAULT_METHOD = "ACH"
+ 
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {
+            "reference": reference,
+            "practice_id": practice_id,
+            "reference_id": None,
+            "success": False,
+            "rows_affected": 0,
+            "updated": {},
+            "available_refund_methods": AVAILABLE_METHODS,
+            "message": "Only supports reference='individual'.",
+        }
+ 
     table, pk_col = _get_table_and_pk("individual")
-
+ 
     with get_connection() as conn:
         rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
         if not rid:
-            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
-                    "success": False, "rows_affected": 0, "updated": {},
-                    "message": "Client not found for this practice_id."}
-
-        fields: Dict[str, Any] = {}
-        if refund_method is not None:
-            fields["refund_method"] = refund_method
-
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": None,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "available_refund_methods": AVAILABLE_METHODS,
+                "message": "Client not found for this practice_id.",
+            }
+ 
+        requested_method = (refund_method or "").strip()
+ 
+        error_message = None
+        final_method = requested_method
+ 
+        if requested_method not in AVAILABLE_METHODS:
+            final_method = DEFAULT_METHOD
+            error_message = (
+                f"Invalid refund method '{refund_method}'. "
+                f"Refund method must be one of {AVAILABLE_METHODS}. "
+                f"Defaulted to '{DEFAULT_METHOD}'."
+            )
+ 
+        fields = {"refund_method": final_method}
+ 
         built = _build_update_query(table, pk_col, rid, fields)
-        if not built:
-            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
-                    "success": False, "rows_affected": 0, "updated": {},
-                    "message": "No fields provided to update."}
-
         q, p = built
+ 
         cur = conn.cursor()
         cur.execute(q, p)
         conn.commit()
-
-        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
-                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
+ 
+        response = {
+            "reference": "individual",
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": True,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+            "available_refund_methods": AVAILABLE_METHODS,
+        }
+ 
+        if error_message:
+            response["message"] = error_message
+ 
+        return response
 
 
 @mcp.tool()
