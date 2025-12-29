@@ -478,50 +478,51 @@ async def ask_question(question, style_preference=None, user_id="default_user", 
        - Just answer the question naturally
        - One question at a time
 
-    **AVAILABLE MCP TOOLS (17 GET / 11 UPDATE):**
+    **AVAILABLE MCP TOOLS:**
 
-    📋 **BASIC PROFILE (5 GET functions):**
+    **GET FUNCTIONS (18 total):**
     1. get_client_full_legal_name(practice_id, reference) → full_legal_name
-    2. get_client_date_of_birth(practice_id, reference) → date_of_birth  
+    2. get_client_date_of_birth(practice_id, reference) → date_of_birth
     3. get_client_current_us_address(practice_id, reference) → address1, address2, city, state, zip, country
     4. get_client_occupation_and_us_income_source(practice_id, reference) → occupation, source_of_us_income
     5. get_client_itin_number(practice_id, reference) → itin
-
-    🛂 **PASSPORT & VISA (2 GET functions):**
     6. get_individual_passport_details(practice_id, reference) → passport_number, passport_country, passport_expiry
     7. get_individual_visa_details(practice_id, reference) → visa_type, visa_issue_country
-
-    ✈️ **US PRESENCE (2 GET functions):**
     8. get_individual_us_entry_exit_dates(practice_id, reference) → first_entry_date_us, last_exit_date_us
     9. get_individual_days_in_us(practice_id, reference) → days_in_us_current_year, days_in_us_prev_year, days_in_us_prev2_years
-
-    📜 **TREATY CLAIMS (1 GET function):**
     10. get_individual_treaty_claim_details(practice_id, reference) → treaty_claimed, treaty_country, treaty_article, treaty_income_type, treaty_exempt_amount, resident_of_treaty_country
-
-    💰 **INCOME (1 GET function):**
     11. get_individual_income_amounts(practice_id, reference) → w2_wages_amount, scholarship_1042s_amount, interest_amount, dividend_amount, capital_gains_amount, rental_income_amount, self_employment_eci_amount
-
-    � **WITHHOLDING (1 GET function):**
     12. get_individual_withholding_amounts(practice_id, reference) → federal_withholding_w2, federal_withholding_1042s, tax_withheld_1099
-
-    📄 **DOCUMENTS (1 GET function):**
     13. get_individual_document_flags(practice_id, reference) → has_w2, has_1042s, has_1099, has_k1
-
-    📊 **DEDUCTIONS (1 GET function):**
     14. get_individual_itemized_deductions(practice_id, reference) → itemized_state_local_tax, itemized_charity, itemized_casualty_losses
+    15. get_individual_education_items(practice_id, reference) → education_expenses, student_loan_interest
+    16. get_individual_dependents_count(practice_id, reference) → dependents_count
+    17. get_individual_refund_method(practice_id, reference) → refund_method
+    18. get_individual_bank_details_last4(practice_id, reference) → bank_routing, bank_account_last4
 
-    💾 **UPDATE FUNCTIONS (11 total):**
-    - update_individual_identity_and_tax_id() → name, DOB, ITIN, filing_status, citizenship, residence
-    - update_client_primary_contact_info() → address, phone, email
-    - update_client_occupation_and_income_source() → occupation, source_of_us_income
-    - update_individual_passport_and_visa() → passport & visa details
-    - update_individual_us_presence() → entry/exit dates, days in US
-    - update_individual_treaty_details() → treaty claim information
-    - update_individual_income_amounts() → all income amounts
-    - update_individual_withholding() → withholding amounts
-    - update_individual_forms_flags() → document availability flags
-    - update_individual_deductions_and_education() → deductions & education
-    - get_master_languages_and_countries() → lookup tables for IDs
+    **UPDATE FUNCTIONS (22 total):**
+    1. update_individual_name(practice_id, reference, first_name, middle_name, last_name)
+    2. update_individual_birth_date(practice_id, reference, birth_date)
+    3. update_individual_ssn_itin_number(practice_id, reference, ssn_itin)
+    4. update_individual_language_and_countries(practice_id, reference, language, country_residence, country_citizenship)
+    5. update_individual_filing_status(practice_id, reference, filing_status)
+    6. update_client_primary_contact_address(practice_id, reference, address1, address2, city, state, zip_code)
+    7. update_client_occupation(practice_id, reference, occupation)
+    8. update_client_source_of_us_income(practice_id, reference, source_of_us_income)
+    9. update_individual_passport_details(practice_id, reference, passport_number, passport_country, passport_expiry)
+    10. update_individual_visa_details(practice_id, reference, visa_type, visa_issue_country)
+    11. update_individual_us_entry_exit_dates(practice_id, reference, first_entry_date_us, last_exit_date_us)
+    12. update_individual_us_days_presence(practice_id, reference, days_in_us_current_year, days_in_us_prev_year, days_in_us_prev2_years)
+    13. update_individual_treaty_details(practice_id, reference, treaty_claimed, treaty_country, treaty_article, treaty_income_type, treaty_exempt_amount, resident_of_treaty_country)
+    14. update_individual_income_w2_1042s(practice_id, reference, w2_wages_amount, scholarship_1042s_amount)
+    15. update_individual_income_investments(practice_id, reference, interest_amount, dividend_amount, capital_gains_amount)
+    16. update_individual_income_business_and_rental(practice_id, reference, rental_income_amount, self_employment_eci_amount)
+    17. update_individual_withholding(practice_id, reference, federal_withholding_w2, federal_withholding_1042s, tax_withheld_1099)
+    18. update_individual_forms_flags(practice_id, reference, has_w2, has_1042s, has_1099, has_k1)
+    19. update_individual_itemized_deductions(practice_id, reference, itemized_state_local_tax, itemized_charity, itemized_casualty_losses)
+    20. update_individual_education_and_dependents(practice_id, reference, education_expenses, student_loan_interest, dependents_count)
+    21. update_individual_refund_method(practice_id, reference, refund_method)
+    22. update_individual_bank_details(practice_id, reference, bank_routing, bank_account_last4)
 
     **AUTOMATIC FUNCTION SELECTION:**
     Based on the question keywords, automatically use the correct GET function:
@@ -539,6 +540,10 @@ async def ask_question(question, style_preference=None, user_id="default_user", 
     - "withholding" → get_individual_withholding_amounts
     - "form" or "document" → get_individual_document_flags
     - "deduction" or "charity" → get_individual_itemized_deductions
+    - "education" or "student" → get_individual_education_items
+    - "dependent" → get_individual_dependents_count
+    - "refund" → get_individual_refund_method
+    - "bank" or "account" → get_individual_bank_details_last4
 
     **RESPONSE EXAMPLES:**
 

@@ -107,48 +107,52 @@ def get_master_languages_and_countries() -> Dict[str, Any]:
 
     return {"languages": languages, "countries": countries}
 
-
-# Update individual identity & tax/residency
-
+# update functions
 @mcp.tool()
-def update_individual_identity_and_tax_id(
+def update_individual_name(
     practice_id: str,
     reference: str,
     first_name: Optional[str] = None,
     middle_name: Optional[str] = None,
     last_name: Optional[str] = None,
-    birth_date: Optional[str] = None,
-    ssn_itin_type: Optional[str] = None,
-    ssn_itin: Optional[str] = None,
-    language_id: Optional[int] = None,
-    country_residence_id: Optional[int] = None,
-    country_citizenship_id: Optional[int] = None,
-    filing_status: Optional[str] = None,
 ) -> Dict[str, Any]:
-    ref_type = reference.lower()
-    if ref_type != "individual":
-        return {
-            "reference": ref_type,
-            "practice_id": practice_id,
-            "success": False,
-            "updated_fields": [],
-            "rows_affected": 0,
-            "message": "update_individual_identity_and_tax_id only supports reference='individual'.",
-        }
+    """
+    Purpose:
+        Update ONLY the individual's name fields:
+          - first_name
+          - middle_name
+          - last_name
 
-    table, pk_col = _get_table_and_pk(ref_type)
+    Args:
+        practice_id (str): internal_data.practice_id
+        reference (str): must be "individual"
+        first_name (str|None): new first name
+        middle_name (str|None): new middle name
+        last_name (str|None): new last name
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id>,
+              "success": true|false,
+              "rows_affected": <int>,
+              "updated": {
+                  "first_name": "...",   # only if updated
+                  "middle_name": "...",  # only if updated
+                  "last_name": "..."     # only if updated
+              }
+            }
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
 
     with get_connection() as conn:
-        resolved_id = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
-        if resolved_id is None:
-            return {
-                "reference": ref_type,
-                "practice_id": practice_id,
-                "success": False,
-                "updated_fields": [],
-                "rows_affected": 0,
-                "message": "No matching internal_data found for this practice_id + reference.",
-            }
+        rid = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
+        if rid is None:
+            return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
 
         fields: Dict[str, Any] = {}
         if first_name is not None:
@@ -157,93 +161,408 @@ def update_individual_identity_and_tax_id(
             fields["middle_name"] = middle_name
         if last_name is not None:
             fields["last_name"] = last_name
-        if birth_date is not None:
-            fields["birth_date"] = birth_date
-        if ssn_itin_type is not None:
-            fields["ssn_itin_type"] = ssn_itin_type
-        if ssn_itin is not None:
-            fields["ssn_itin"] = ssn_itin
-        if language_id is not None:
-            fields["language"] = language_id
-        if country_residence_id is not None:
-            fields["country_residence"] = country_residence_id
-        if country_citizenship_id is not None:
-            fields["country_citizenship"] = country_citizenship_id
-        if filing_status is not None:
-            fields["filing_status"] = filing_status
 
-        built = _build_update_query(table, pk_col, resolved_id, fields)
+        built = _build_update_query("individual", "id", rid, fields)
         if not built:
-            return {
-                "reference": ref_type,
-                "practice_id": practice_id,
-                "reference_id": resolved_id,
-                "success": False,
-                "updated_fields": [],
-                "rows_affected": 0,
-                "message": "No fields provided to update.",
-            }
+            return {"reference": ref_type, "practice_id": practice_id, "reference_id": rid, "success": False, "rows_affected": 0, "updated": {}}
 
-        query, params = built
-        cursor = conn.cursor()
-        cursor.execute(query, params)
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
         conn.commit()
 
         return {
             "reference": ref_type,
             "practice_id": practice_id,
-            "reference_id": resolved_id,
-            "success": cursor.rowcount > 0,
-            "updated_fields": list(fields.keys()),
-            "rows_affected": cursor.rowcount,
-            "message": "Update applied." if cursor.rowcount > 0 else "No rows updated.",
+            "reference_id": rid,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
         }
 
 
-# Update primary contact info (contact_info)
-
 @mcp.tool()
-def update_client_primary_contact_info(
+def update_individual_birth_date(
     practice_id: str,
     reference: str,
-    first_name: Optional[str] = None,
-    middle_name: Optional[str] = None,
-    last_name: Optional[str] = None,
-    phone1_country: Optional[int] = None,
-    phone1: Optional[str] = None,
-    phone2_country: Optional[int] = None,
-    phone2: Optional[str] = None,
-    email1: Optional[str] = None,
-    email2: Optional[str] = None,
-    whatsapp_country: Optional[int] = None,
-    whatsapp: Optional[str] = None,
-    website: Optional[str] = None,
+    birth_date: Optional[str] = None,  #"YYYY-MM-DD"
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY the individual's birth_date.
+
+    Args:
+        practice_id (str): internal_data.practice_id
+        reference (str): must be "individual"
+        birth_date (str|None): "YYYY-MM-DD"
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id>,
+              "success": true|false,
+              "rows_affected": <int>,
+              "updated": {"birth_date": "YYYY-MM-DD"}
+            }
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+    if birth_date is None:
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
+        if rid is None:
+            return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+        fields = {"birth_date": birth_date}
+        built = _build_update_query("individual", "id", rid, fields)
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
+
+
+@mcp.tool()
+def update_individual_ssn_itin_number(
+    practice_id: str,
+    reference: str,
+    ssn_itin: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY the individual's ssn_itin field (the number).
+
+    Args:
+        practice_id (str): internal_data.practice_id
+        reference (str): must be "individual"
+        ssn_itin (str|None): new tax id number stored in individual.ssn_itin
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id>,
+              "success": true|false,
+              "rows_affected": <int>,
+              "updated": {"ssn_itin": "<value>"}
+            }
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+    if ssn_itin is None:
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
+        if rid is None:
+            return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+        fields = {"ssn_itin": ssn_itin}
+        built = _build_update_query("individual", "id", rid, fields)
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
+
+
+@mcp.tool()
+def update_individual_language_and_countries(
+    practice_id: str,
+    reference: str,
+    language: Optional[str] = None,
+    country_residence: Optional[str] = None,
+    country_citizenship: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY these individual fields by mapping STRING inputs to IDs:
+          - individual.language (from languages.language)
+          - individual.country_residence (from countries.country_name or countries.country_code)
+          - individual.country_citizenship (from countries.country_name or countries.country_code)
+
+        IMPORTANT:
+          This function does NOT accept integer IDs in args.
+          It accepts readable strings and resolves IDs from master tables.
+
+    Args:
+        practice_id (str): internal_data.practice_id
+        reference (str): must be "individual"
+        language (str|None): example "English"
+        country_residence (str|None): example "India" or "IN"
+        country_citizenship (str|None): example "India" or "IN"
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id>,
+              "success": true|false,
+              "rows_affected": <int>,
+              "updated": {
+                 "language": {"input": "English", "id": 1},
+                 "country_residence": {"input": "India", "id": 9},
+                 "country_citizenship": {"input": "India", "id": 9}
+              }
+            }
+
+        Notes:
+          - If an input string cannot be matched, that field is not updated.
+          - If nothing can be matched/updated, success=false and updated={} is returned.
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
+        if rid is None:
+            return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+        cursor = conn.cursor(dictionary=True)
+
+        fields: Dict[str, Any] = {}
+        updated_payload: Dict[str, Any] = {}
+
+        if language is not None and str(language).strip():
+            cursor.execute(
+                """
+                SELECT id, language
+                FROM languages
+                WHERE LOWER(language) = LOWER(%s)
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (language.strip(),),
+            )
+            lang_row = cursor.fetchone()
+            if lang_row and lang_row.get("id") is not None:
+                fields["language"] = int(lang_row["id"])
+                updated_payload["language"] = {"input": language.strip(), "id": int(lang_row["id"])}
+
+        def _find_country_id(country_str: str) -> Optional[int]:
+            s = (country_str or "").strip()
+            if not s:
+                return None
+            cursor.execute(
+                """
+                SELECT id
+                FROM countries
+                WHERE LOWER(country_name) = LOWER(%s)
+                   OR LOWER(country_code) = LOWER(%s)
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (s, s),
+            )
+            r = cursor.fetchone()
+            return int(r["id"]) if r and r.get("id") is not None else None
+
+        if country_residence is not None and str(country_residence).strip():
+            cid = _find_country_id(country_residence)
+            if cid is not None:
+                fields["country_residence"] = cid
+                updated_payload["country_residence"] = {"input": country_residence.strip(), "id": cid}
+
+        if country_citizenship is not None and str(country_citizenship).strip():
+            cid = _find_country_id(country_citizenship)
+            if cid is not None:
+                fields["country_citizenship"] = cid
+                updated_payload["country_citizenship"] = {"input": country_citizenship.strip(), "id": cid}
+
+        if not fields:
+            return {
+                "reference": ref_type,
+                "practice_id": practice_id,
+                "reference_id": rid,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+            }
+
+        built = _build_update_query("individual", "id", rid, fields)
+        q, p = built
+        cur2 = conn.cursor()
+        cur2.execute(q, p)
+        conn.commit()
+
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": cur2.rowcount > 0,
+            "rows_affected": cur2.rowcount,
+            "updated": updated_payload,
+        }
+
+
+@mcp.tool()
+def update_individual_filing_status(
+    practice_id: str,
+    reference: str,
+    filing_status: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY the individual's filing_status.
+
+    Args:
+        practice_id (str): internal_data.practice_id
+        reference (str): must be "individual"
+        filing_status (str|None): new filing status value (stored in individual.filing_status)
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id>,
+              "success": true|false,
+              "rows_affected": <int>,
+              "updated": {"filing_status": "<value>"}
+            }
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+    if filing_status is None:
+        return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
+        if rid is None:
+            return {"reference": ref_type, "practice_id": practice_id, "success": False, "rows_affected": 0, "updated": {}}
+
+        fields = {"filing_status": filing_status}
+        built = _build_update_query("individual", "id", rid, fields)
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
+
+
+@mcp.tool()
+def update_client_primary_contact_address(
+    practice_id: str,
+    reference: str,
     address1: Optional[str] = None,
     address2: Optional[str] = None,
     city: Optional[str] = None,
     state: Optional[str] = None,
     zip_code: Optional[str] = None,
-    country_id: Optional[int] = None,
-    company_name: Optional[str] = None,
-    status: Optional[int] = None,
 ) -> Dict[str, Any]:
-    ref_type = reference.lower()
+    """
+    Purpose:
+        Update ONLY the address fields of the client's primary contact record
+        in contact_info:
+          - address1
+          - address2
+          - city
+          - state
+          - zip (from zip_code arg)
+
+        It selects the "primary" contact record as:
+            ORDER BY status DESC, id ASC LIMIT 1
+        for the given (reference, reference_id).
+
+    Args:
+        practice_id (str):
+            internal_data.practice_id for the client.
+        reference (str):
+            "company" or "individual".
+        address1 (str | None):
+            Street address line 1.
+        address2 (str | None):
+            Street address line 2 / apartment / suite.
+        city (str | None):
+            City.
+        state (str | None):
+            State/Province.
+        zip_code (str | None):
+            ZIP / Postal code (stored in contact_info.zip).
+
+    Returns:
+        dict:
+            {
+              "reference": "<company|individual>",
+              "practice_id": "<practice_id>",
+              "reference_id": <company.company_id or individual.id>,
+              "contact_id": <contact_info.id>,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": {
+                 "address1": "...",   # only if provided
+                 "address2": "...",
+                 "city": "...",
+                 "state": "...",
+                 "zip": "..."
+              }
+            }
+    """
+    ref_type = (reference or "").lower().strip()
 
     with get_connection() as conn:
-        resolved_id = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
-        if resolved_id is None:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT reference_id
+            FROM internal_data
+            WHERE practice_id = %s
+              AND reference = %s
+            LIMIT 1
+            """,
+            (practice_id, ref_type),
+        )
+        row = cursor.fetchone()
+        if not row or row.get("reference_id") is None:
             return {
                 "reference": ref_type,
                 "practice_id": practice_id,
                 "reference_id": None,
                 "contact_id": None,
                 "success": False,
-                "updated_fields": [],
                 "rows_affected": 0,
-                "message": "No matching internal_data found for this practice_id + reference.",
+                "updated": {},
             }
 
-        cursor = conn.cursor(dictionary=True)
+        reference_id = int(row["reference_id"])
+
         cursor.execute(
             """
             SELECT id
@@ -253,48 +572,23 @@ def update_client_primary_contact_info(
             ORDER BY status DESC, id ASC
             LIMIT 1
             """,
-            (ref_type, resolved_id),
+            (ref_type, reference_id),
         )
         existing = cursor.fetchone()
-        if not existing:
+        if not existing or existing.get("id") is None:
             return {
                 "reference": ref_type,
                 "practice_id": practice_id,
-                "reference_id": resolved_id,
+                "reference_id": reference_id,
                 "contact_id": None,
                 "success": False,
-                "updated_fields": [],
                 "rows_affected": 0,
-                "message": "No existing contact_info record found to update.",
+                "updated": {},
             }
 
-        contact_id = existing["id"]
+        contact_id = int(existing["id"])
 
         fields: Dict[str, Any] = {}
-        if first_name is not None:
-            fields["first_name"] = first_name
-        if middle_name is not None:
-            fields["middle_name"] = middle_name
-        if last_name is not None:
-            fields["last_name"] = last_name
-        if phone1_country is not None:
-            fields["phone1_country"] = phone1_country
-        if phone1 is not None:
-            fields["phone1"] = phone1
-        if phone2_country is not None:
-            fields["phone2_country"] = phone2_country
-        if phone2 is not None:
-            fields["phone2"] = phone2
-        if email1 is not None:
-            fields["email1"] = email1
-        if email2 is not None:
-            fields["email2"] = email2
-        if whatsapp_country is not None:
-            fields["whats_app_country"] = whatsapp_country
-        if whatsapp is not None:
-            fields["whatsapp"] = whatsapp
-        if website is not None:
-            fields["website"] = website
         if address1 is not None:
             fields["address1"] = address1
         if address2 is not None:
@@ -305,328 +599,629 @@ def update_client_primary_contact_info(
             fields["state"] = state
         if zip_code is not None:
             fields["zip"] = zip_code
-        if country_id is not None:
-            fields["country"] = country_id
-        if company_name is not None:
-            fields["company"] = company_name
-        if status is not None:
-            fields["status"] = status
 
-        built = _build_update_query("contact_info", "id", contact_id, fields)
-        if not built:
+        if not fields:
             return {
                 "reference": ref_type,
                 "practice_id": practice_id,
-                "reference_id": resolved_id,
+                "reference_id": reference_id,
                 "contact_id": contact_id,
                 "success": False,
-                "updated_fields": [],
                 "rows_affected": 0,
-                "message": "No fields provided to update.",
+                "updated": {},
             }
 
-        query, params = built
-        cursor2 = conn.cursor()
-        cursor2.execute(query, params)
-        conn.commit()
+        set_clause = ", ".join([f"{col} = %s" for col in fields.keys()])
+        params = list(fields.values()) + [contact_id]
 
-        return {
-            "reference": ref_type,
-            "practice_id": practice_id,
-            "reference_id": resolved_id,
-            "contact_id": contact_id,
-            "success": cursor2.rowcount > 0,
-            "updated_fields": list(fields.keys()),
-            "rows_affected": cursor2.rowcount,
-            "message": "Update applied." if cursor2.rowcount > 0 else "No rows updated.",
-        }
-
-
-# Update internal_data assignments
-@mcp.tool()
-def update_client_internal_assignments(
-    practice_id: str,
-    reference: str,
-    office: Optional[int] = None,
-    brand_id: Optional[int] = None,
-    partner: Optional[int] = None,
-    manager: Optional[int] = None,
-    assistant: Optional[int] = None,
-    property_manager: Optional[str] = None,
-    client_association: Optional[str] = None,
-    new_practice_id: Optional[str] = None,
-    referred_by_source: Optional[int] = None,
-    referred_by_name: Optional[str] = None,
-    language_id: Optional[int] = None,
-    status: Optional[int] = None,
-    tenant_id: Optional[str] = None,
-    customer_vault_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    ref_type = reference.lower()
-
-    with get_connection() as conn:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT id, reference_id
-            FROM internal_data
-            WHERE practice_id = %s
-              AND reference = %s
+        query = f"""
+            UPDATE contact_info
+            SET {set_clause}
+            WHERE id = %s
             LIMIT 1
-            """,
-            (practice_id, ref_type),
-        )
-        row = cursor.fetchone()
-        if not row:
-            return {
-                "reference": ref_type,
-                "practice_id": practice_id,
-                "internal_data_id": None,
-                "reference_id": None,
-                "success": False,
-                "updated_fields": [],
-                "rows_affected": 0,
-                "message": "No internal_data record found to update for this practice_id + reference.",
-            }
+        """
 
-        internal_id = row["id"]
-        resolved_reference_id = row.get("reference_id")
-
-        fields: Dict[str, Any] = {}
-        if office is not None:
-            fields["office"] = office
-        if brand_id is not None:
-            fields["brand_id"] = brand_id
-        if partner is not None:
-            fields["partner"] = partner
-        if manager is not None:
-            fields["manager"] = manager
-        if assistant is not None:
-            fields["assistant"] = assistant
-        if property_manager is not None:
-            fields["property_manager"] = property_manager
-        if client_association is not None:
-            fields["client_association"] = client_association
-        if new_practice_id is not None:
-            fields["practice_id"] = new_practice_id
-        if referred_by_source is not None:
-            fields["referred_by_source"] = referred_by_source
-        if referred_by_name is not None:
-            fields["referred_by_name"] = referred_by_name
-        if language_id is not None:
-            fields["language"] = language_id
-        if status is not None:
-            fields["status"] = status
-        if tenant_id is not None:
-            fields["tenantId"] = tenant_id
-        if customer_vault_id is not None:
-            fields["customer_vault_id"] = customer_vault_id
-
-        built = _build_update_query("internal_data", "id", internal_id, fields)
-        if not built:
-            return {
-                "reference": ref_type,
-                "practice_id": practice_id,
-                "internal_data_id": internal_id,
-                "reference_id": resolved_reference_id,
-                "success": False,
-                "updated_fields": [],
-                "rows_affected": 0,
-                "message": "No fields provided to update.",
-            }
-
-        query, params = built
-        cursor2 = conn.cursor()
-        cursor2.execute(query, params)
+        cur2 = conn.cursor()
+        cur2.execute(query, params)
         conn.commit()
 
         return {
             "reference": ref_type,
             "practice_id": practice_id,
-            "internal_data_id": internal_id,
-            "reference_id": resolved_reference_id,
-            "success": cursor2.rowcount > 0,
-            "updated_fields": list(fields.keys()),
-            "rows_affected": cursor2.rowcount,
-            "message": "Update applied." if cursor2.rowcount > 0 else "No rows updated.",
+            "reference_id": reference_id,
+            "contact_id": contact_id,
+            "success": cur2.rowcount > 0,
+            "rows_affected": cur2.rowcount,
+            "updated": fields,
         }
 
-#Update occupation and us source of income 
+
 @mcp.tool()
-def update_client_occupation_and_income_source(
+def update_client_occupation(
     practice_id: str,
     reference: str,
     occupation: Optional[str] = None,
-    source_of_us_income: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Purpose:
-        Update occupation and/or source_of_us_income for a client (company/individual)
+        Update ONLY the `occupation` field for a client (company/individual)
         using practice_id + reference.
+
+    Updates:
+        - occupation
 
     Args:
         practice_id (str):
-            internal_data.practice_id of the client
+            internal_data.practice_id of the client.
         reference (str):
-            "company" or "individual"
+            "company" or "individual".
         occupation (str | None):
-            New occupation value
-        source_of_us_income (str | None):
-            New source_of_us_income value
+            New occupation value.
 
     Returns:
         dict:
             {
-                "reference": "company" | "individual",
-                "practice_id": <practice_id>,
-                "reference_id": <company.company_id or individual.id>,
-                "success": bool,
-                "updated_fields": [...],
-                "rows_affected": int,
-                "message": str,
+              "reference": "company" | "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <company.company_id or individual.id> | None,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": { "occupation": "<value>" }   # only if provided
             }
     """
-    ref_type = reference.lower().strip()
+    ref_type = (reference or "").lower().strip()
     table, pk_col = _get_table_and_pk(ref_type)
 
     with get_connection() as conn:
-        resolved_id = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
-        if resolved_id is None:
+        reference_id = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
+        if reference_id is None:
             return {
                 "reference": ref_type,
                 "practice_id": practice_id,
+                "reference_id": None,
                 "success": False,
-                "updated_fields": [],
                 "rows_affected": 0,
-                "message": "No matching internal_data found for this practice_id + reference.",
+                "updated": {},
             }
 
-        fields: Dict[str, Any] = {}
-        if occupation is not None:
-            fields["occupation"] = occupation
-        if source_of_us_income is not None:
-            fields["source_of_us_income"] = source_of_us_income
+        if occupation is None:
+            return {
+                "reference": ref_type,
+                "practice_id": practice_id,
+                "reference_id": reference_id,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+            }
 
-        built = _build_update_query(table, pk_col, resolved_id, fields)
+        fields: Dict[str, Any] = {"occupation": occupation}
+
+        built = _build_update_query(table, pk_col, reference_id, fields)
         if not built:
             return {
                 "reference": ref_type,
                 "practice_id": practice_id,
-                "reference_id": resolved_id,
+                "reference_id": reference_id,
                 "success": False,
-                "updated_fields": [],
                 "rows_affected": 0,
-                "message": "No fields provided to update.",
+                "updated": {},
             }
 
         query, params = built
-        cursor = conn.cursor()
-        cursor.execute(query, params)
+        cur = conn.cursor()
+        cur.execute(query, params)
         conn.commit()
 
         return {
             "reference": ref_type,
             "practice_id": practice_id,
-            "reference_id": resolved_id,
-            "success": cursor.rowcount > 0,
-            "updated_fields": list(fields.keys()),
-            "rows_affected": cursor.rowcount,
-            "message": "Update applied." if cursor.rowcount > 0 else "No rows updated.",
+            "reference_id": reference_id,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
         }
 
-# update Passport & Visa Details
+
 @mcp.tool()
-def update_individual_passport_and_visa(
+def update_client_source_of_us_income(
+    practice_id: str,
+    reference: str,
+    source_of_us_income: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY the `source_of_us_income` field for a client (company/individual)
+        using practice_id + reference.
+
+    Updates:
+        - source_of_us_income
+
+    Args:
+        practice_id (str):
+            internal_data.practice_id of the client.
+        reference (str):
+            "company" or "individual".
+        source_of_us_income (str | None):
+            New value for source_of_us_income.
+
+    Returns:
+        dict:
+            {
+              "reference": "company" | "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <company.company_id or individual.id> | None,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": { "source_of_us_income": "<value>" }  # only if provided
+            }
+    """
+    ref_type = (reference or "").lower().strip()
+    table, pk_col = _get_table_and_pk(ref_type)
+
+    with get_connection() as conn:
+        reference_id = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
+        if reference_id is None:
+            return {
+                "reference": ref_type,
+                "practice_id": practice_id,
+                "reference_id": None,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+            }
+
+        if source_of_us_income is None:
+            return {
+                "reference": ref_type,
+                "practice_id": practice_id,
+                "reference_id": reference_id,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+            }
+
+        fields: Dict[str, Any] = {"source_of_us_income": source_of_us_income}
+
+        built = _build_update_query(table, pk_col, reference_id, fields)
+        if not built:
+            return {
+                "reference": ref_type,
+                "practice_id": practice_id,
+                "reference_id": reference_id,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+            }
+
+        query, params = built
+        cur = conn.cursor()
+        cur.execute(query, params)
+        conn.commit()
+
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": reference_id,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
+
+
+@mcp.tool()
+def update_individual_passport_details(
     practice_id: str,
     reference: str,
     passport_number: Optional[str] = None,
     passport_country: Optional[str] = None,
     passport_expiry: Optional[str] = None,
-    visa_type: Optional[str] = None,
-    visa_issue_country: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY passport-related fields for an individual client.
 
-    if reference.lower() != "individual":
-        return {"success": False, "message": "Only for individual"}
+    Updates:
+        - passport_number
+        - passport_country
+        - passport_expiry
+
+    Args:
+        practice_id (str):
+            internal_data.practice_id for the client.
+        reference (str):
+            Must be "individual".
+        passport_number (str | None):
+            Passport number.
+        passport_country (str | None):
+            Passport issuing country (as stored in your DB).
+        passport_expiry (str | None):
+            Passport expiry date (YYYY-MM-DD).
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id> | None,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": {
+                 "passport_number": "...",
+                 "passport_country": "...",
+                 "passport_expiry": "YYYY-MM-DD"
+              }
+            }
+            Note: `updated` contains ONLY the fields provided in the request.
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": None,
+            "success": False,
+            "rows_affected": 0,
+            "updated": {},
+            "message": "update_individual_passport_details only supports reference='individual'.",
+        }
 
     table, pk_col = _get_table_and_pk("individual")
 
     with get_connection() as conn:
-        resolved_id = _resolve_reference_id_from_practice(conn, practice_id, "individual")
-        if not resolved_id:
-            return {"success": False, "message": "Client not found"}
+        reference_id = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not reference_id:
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": None,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "Client not found for this practice_id.",
+            }
 
-        fields = {}
+        fields: Dict[str, Any] = {}
         if passport_number is not None:
             fields["passport_number"] = passport_number
         if passport_country is not None:
             fields["passport_country"] = passport_country
         if passport_expiry is not None:
             fields["passport_expiry"] = passport_expiry
-        if visa_type is not None:
-            fields["visa_type"] = visa_type
-        if visa_issue_country is not None:
-            fields["visa_issue_country"] = visa_issue_country
 
-        built = _build_update_query(table, pk_col, resolved_id, fields)
+        built = _build_update_query(table, pk_col, reference_id, fields)
         if not built:
-            return {"success": False, "message": "No fields provided"}
-
-        q, p = built
-        c = conn.cursor()
-        c.execute(q, p)
-        conn.commit()
-
-        return {
-            "success": True,
-            "updated_fields": list(fields.keys()),
-            "rows_affected": c.rowcount,
-        }
-
-# update US Entry / Exit & Physical Presence
-@mcp.tool()
-def update_individual_us_presence(
-    practice_id: str,
-    reference: str,
-    first_entry_date_us: Optional[str] = None,
-    last_exit_date_us: Optional[str] = None,
-    days_in_us_current_year: Optional[int] = None,
-    days_in_us_prev_year: Optional[int] = None,
-    days_in_us_prev2_years: Optional[int] = None,
-) -> Dict[str, Any]:
-    if reference.lower() != "individual":
-        return {"success": False}
-
-    table, pk_col = _get_table_and_pk("individual")
-
-    with get_connection() as conn:
-        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
-        if not rid:
-            return {"success": False}
-
-        fields = {}
-        for k, v in {
-            "first_entry_date_us": first_entry_date_us,
-            "last_exit_date_us": last_exit_date_us,
-            "days_in_us_current_year": days_in_us_current_year,
-            "days_in_us_prev_year": days_in_us_prev_year,
-            "days_in_us_prev2_years": days_in_us_prev2_years,
-        }.items():
-            if v is not None:
-                fields[k] = v
-
-        built = _build_update_query(table, pk_col, rid, fields)
-        if not built:
-            return {"success": False}
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": reference_id,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "No passport fields provided to update.",
+            }
 
         q, p = built
         cur = conn.cursor()
         cur.execute(q, p)
         conn.commit()
 
-        return {"success": True, "updated_fields": list(fields.keys())}
+        return {
+            "reference": "individual",
+            "practice_id": practice_id,
+            "reference_id": reference_id,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
 
-# update Treaty Claim Details
+
+@mcp.tool()
+def update_individual_visa_details(
+    practice_id: str,
+    reference: str,
+    visa_type: Optional[str] = None,
+    visa_issue_country: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY visa-related fields for an individual client.
+
+    Updates:
+        - visa_type
+        - visa_issue_country
+
+    Args:
+        practice_id (str):
+            internal_data.practice_id for the client.
+        reference (str):
+            Must be "individual".
+        visa_type (str | None):
+            Visa type (e.g., F1, J1, H1B).
+        visa_issue_country (str | None):
+            Country where visa was issued (as stored in your DB).
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id> | None,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": {
+                 "visa_type": "...",
+                 "visa_issue_country": "..."
+              }
+            }
+            Note: `updated` contains ONLY the fields provided in the request.
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": None,
+            "success": False,
+            "rows_affected": 0,
+            "updated": {},
+            "message": "update_individual_visa_details only supports reference='individual'.",
+        }
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        reference_id = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not reference_id:
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": None,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "Client not found for this practice_id.",
+            }
+
+        fields: Dict[str, Any] = {}
+        if visa_type is not None:
+            fields["visa_type"] = visa_type
+        if visa_issue_country is not None:
+            fields["visa_issue_country"] = visa_issue_country
+
+        built = _build_update_query(table, pk_col, reference_id, fields)
+        if not built:
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": reference_id,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "No visa fields provided to update.",
+            }
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {
+            "reference": "individual",
+            "practice_id": practice_id,
+            "reference_id": reference_id,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
+
+
+@mcp.tool()
+def update_individual_us_entry_exit_dates(
+    practice_id: str,
+    reference: str,
+    first_entry_date_us: Optional[str] = None,
+    last_exit_date_us: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY the US entry/exit date fields for an individual.
+
+    Updates:
+        - first_entry_date_us
+        - last_exit_date_us
+
+    Args:
+        practice_id (str):
+            internal_data.practice_id for the client.
+        reference (str):
+            Must be "individual".
+        first_entry_date_us (str | None):
+            First entry date into the US (YYYY-MM-DD).
+        last_exit_date_us (str | None):
+            Most recent exit date from the US (YYYY-MM-DD).
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id> | None,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": {
+                 "first_entry_date_us": "...",
+                 "last_exit_date_us": "..."
+              }
+            }
+            Note: `updated` includes only fields provided in the request.
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": None,
+            "success": False,
+            "rows_affected": 0,
+            "updated": {},
+            "message": "update_individual_us_entry_exit_dates only supports reference='individual'.",
+        }
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not rid:
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": None,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "Client not found for this practice_id.",
+            }
+
+        fields: Dict[str, Any] = {}
+        if first_entry_date_us is not None:
+            fields["first_entry_date_us"] = first_entry_date_us
+        if last_exit_date_us is not None:
+            fields["last_exit_date_us"] = last_exit_date_us
+
+        built = _build_update_query(table, pk_col, rid, fields)
+        if not built:
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": rid,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "No entry/exit date fields provided to update.",
+            }
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {
+            "reference": "individual",
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
+
+
+@mcp.tool()
+def update_individual_us_days_presence(
+    practice_id: str,
+    reference: str,
+    days_in_us_current_year: Optional[int] = None,
+    days_in_us_prev_year: Optional[int] = None,
+    days_in_us_prev2_years: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update ONLY the physical presence day-count fields for an individual.
+
+    Updates:
+        - days_in_us_current_year
+        - days_in_us_prev_year
+        - days_in_us_prev2_years
+
+    Args:
+        practice_id (str):
+            internal_data.practice_id for the client.
+        reference (str):
+            Must be "individual".
+        days_in_us_current_year (int | None):
+            Days present in the US for current tax year.
+        days_in_us_prev_year (int | None):
+            Days present in the US for previous tax year.
+        days_in_us_prev2_years (int | None):
+            Days present in the US for the tax year two years ago.
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id> | None,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": {
+                 "days_in_us_current_year": <int>,
+                 "days_in_us_prev_year": <int>,
+                 "days_in_us_prev2_years": <int>
+              }
+            }
+            Note: `updated` includes only fields provided in the request.
+    """
+    ref_type = (reference or "").lower().strip()
+    if ref_type != "individual":
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "reference_id": None,
+            "success": False,
+            "rows_affected": 0,
+            "updated": {},
+            "message": "update_individual_us_days_presence only supports reference='individual'.",
+        }
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not rid:
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": None,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "Client not found for this practice_id.",
+            }
+
+        fields: Dict[str, Any] = {}
+        if days_in_us_current_year is not None:
+            fields["days_in_us_current_year"] = int(days_in_us_current_year)
+        if days_in_us_prev_year is not None:
+            fields["days_in_us_prev_year"] = int(days_in_us_prev_year)
+        if days_in_us_prev2_years is not None:
+            fields["days_in_us_prev2_years"] = int(days_in_us_prev2_years)
+
+        built = _build_update_query(table, pk_col, rid, fields)
+        if not built:
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": rid,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "No day-count fields provided to update.",
+            }
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {
+            "reference": "individual",
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": cur.rowcount > 0,
+            "rows_affected": cur.rowcount,
+            "updated": fields,
+        }
+
+
 @mcp.tool()
 def update_individual_treaty_details(
     practice_id: str,
@@ -638,72 +1233,311 @@ def update_individual_treaty_details(
     treaty_exempt_amount: Optional[float] = None,
     resident_of_treaty_country: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update tax treaty–related details for an individual client.
+        This function handles ALL treaty fields together because they
+        represent a single logical tax concept.
+
+    Updates (individual table):
+        - treaty_claimed
+        - treaty_country
+        - treaty_article
+        - treaty_income_type
+        - treaty_exempt_amount
+        - resident_of_treaty_country
+
+    Args:
+        practice_id (str):
+            internal_data.practice_id for the individual client.
+        reference (str):
+            Must be "individual".
+        treaty_claimed (str | None):
+            'y' or 'n' indicating whether a tax treaty is claimed.
+        treaty_country (str | None):
+            Country under which the treaty is claimed.
+        treaty_article (str | None):
+            Treaty article number/name.
+        treaty_income_type (str | None):
+            Type of income covered by the treaty.
+        treaty_exempt_amount (float | None):
+            Amount exempt under treaty provisions.
+        resident_of_treaty_country (str | None):
+            'y' or 'n' indicating residency of treaty country.
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "<practice_id>",
+              "reference_id": <individual.id> | None,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": {
+                  "treaty_claimed": "...",
+                  "treaty_country": "...",
+                  ...
+              }
+            }
+            Only fields actually updated are returned inside `updated`.
+    """
+
+    if (reference or "").lower().strip() != "individual":
+        return {
+            "reference": reference,
+            "practice_id": practice_id,
+            "reference_id": None,
+            "success": False,
+            "rows_affected": 0,
+            "updated": {},
+            "message": "update_individual_treaty_details only supports reference='individual'.",
+        }
 
     table, pk_col = _get_table_and_pk("individual")
 
     with get_connection() as conn:
         rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
         if not rid:
-            return {"success": False}
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": None,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "No matching individual found for this practice_id.",
+            }
 
-        fields = {}
-        for k, v in locals().items():
-            if k in [
-                "treaty_claimed", "treaty_country", "treaty_article",
-                "treaty_income_type", "treaty_exempt_amount",
-                "resident_of_treaty_country"
-            ] and v is not None:
-                fields[k] = v
+        fields: Dict[str, Any] = {}
+        if treaty_claimed is not None:
+            fields["treaty_claimed"] = treaty_claimed
+        if treaty_country is not None:
+            fields["treaty_country"] = treaty_country
+        if treaty_article is not None:
+            fields["treaty_article"] = treaty_article
+        if treaty_income_type is not None:
+            fields["treaty_income_type"] = treaty_income_type
+        if treaty_exempt_amount is not None:
+            fields["treaty_exempt_amount"] = treaty_exempt_amount
+        if resident_of_treaty_country is not None:
+            fields["resident_of_treaty_country"] = resident_of_treaty_country
 
         built = _build_update_query(table, pk_col, rid, fields)
         if not built:
-            return {"success": False}
+            return {
+                "reference": "individual",
+                "practice_id": practice_id,
+                "reference_id": rid,
+                "success": False,
+                "rows_affected": 0,
+                "updated": {},
+                "message": "No treaty fields provided to update.",
+            }
 
         q, p = built
-        c = conn.cursor()
-        c.execute(q, p)
+        cursor = conn.cursor()
+        cursor.execute(q, p)
         conn.commit()
 
-        return {"success": True, "updated_fields": list(fields.keys())}
+        return {
+            "reference": "individual",
+            "practice_id": practice_id,
+            "reference_id": rid,
+            "success": cursor.rowcount > 0,
+            "rows_affected": cursor.rowcount,
+            "updated": fields,
+        }
 
-# update Income Buckets (W-2 / 1042-S / Investment / Rental)
+
 @mcp.tool()
-def update_individual_income_amounts(
+def update_individual_income_w2_1042s(
     practice_id: str,
     reference: str,
     w2_wages_amount: Optional[float] = None,
     scholarship_1042s_amount: Optional[float] = None,
-    interest_amount: Optional[float] = None,
-    dividend_amount: Optional[float] = None,
-    capital_gains_amount: Optional[float] = None,
-    rental_income_amount: Optional[float] = None,
-    self_employment_eci_amount: Optional[float] = None,
 ) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update W-2 wages and/or 1042-S scholarship amounts for an individual.
+
+    Updates (individual table):
+        - w2_wages_amount
+        - scholarship_1042s_amount
+
+    Args:
+        practice_id (str): internal_data.practice_id for the client.
+        reference (str): must be "individual".
+        w2_wages_amount (float | None): new W-2 wages amount.
+        scholarship_1042s_amount (float | None): new 1042-S scholarship amount.
+
+    Returns:
+        dict:
+            {
+              "reference": "individual",
+              "practice_id": "...",
+              "reference_id": <int|None>,
+              "success": <bool>,
+              "rows_affected": <int>,
+              "updated": { "w2_wages_amount": ..., "scholarship_1042s_amount": ... }
+            }
+            Only updated fields appear inside `updated`.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
 
     table, pk_col = _get_table_and_pk("individual")
 
     with get_connection() as conn:
         rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
         if not rid:
-            return {"success": False}
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
 
-        fields = {
-            k: v for k, v in locals().items()
-            if k.endswith("_amount") and v is not None
-        }
+        fields: Dict[str, Any] = {}
+        if w2_wages_amount is not None:
+            fields["w2_wages_amount"] = w2_wages_amount
+        if scholarship_1042s_amount is not None:
+            fields["scholarship_1042s_amount"] = scholarship_1042s_amount
 
         built = _build_update_query(table, pk_col, rid, fields)
         if not built:
-            return {"success": False}
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
 
         q, p = built
         cur = conn.cursor()
         cur.execute(q, p)
         conn.commit()
 
-        return {"success": True, "updated_fields": list(fields.keys())}
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
 
-# Federal Withholding update
+
+@mcp.tool()
+def update_individual_income_investments(
+    practice_id: str,
+    reference: str,
+    interest_amount: Optional[float] = None,
+    dividend_amount: Optional[float] = None,
+    capital_gains_amount: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update investment income amounts for an individual.
+
+    Updates (individual table):
+        - interest_amount
+        - dividend_amount
+        - capital_gains_amount
+
+    Args:
+        practice_id (str): internal_data.practice_id for the client.
+        reference (str): must be "individual".
+        interest_amount (float | None)
+        dividend_amount (float | None)
+        capital_gains_amount (float | None)
+
+    Returns:
+        dict with only updated values under `updated`.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not rid:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
+
+        fields: Dict[str, Any] = {}
+        if interest_amount is not None:
+            fields["interest_amount"] = interest_amount
+        if dividend_amount is not None:
+            fields["dividend_amount"] = dividend_amount
+        if capital_gains_amount is not None:
+            fields["capital_gains_amount"] = capital_gains_amount
+
+        built = _build_update_query(table, pk_col, rid, fields)
+        if not built:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
+
+@mcp.tool()
+def update_individual_income_business_and_rental(
+    practice_id: str,
+    reference: str,
+    rental_income_amount: Optional[float] = None,
+    self_employment_eci_amount: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update rental income and/or self-employment ECI amounts for an individual.
+
+    Updates (individual table):
+        - rental_income_amount
+        - self_employment_eci_amount
+
+    Args:
+        practice_id (str), reference (str)
+        rental_income_amount (float | None)
+        self_employment_eci_amount (float | None)
+
+    Returns:
+        dict with updated values only.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not rid:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
+
+        fields: Dict[str, Any] = {}
+        if rental_income_amount is not None:
+            fields["rental_income_amount"] = rental_income_amount
+        if self_employment_eci_amount is not None:
+            fields["self_employment_eci_amount"] = self_employment_eci_amount
+
+        built = _build_update_query(table, pk_col, rid, fields)
+        if not built:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
+
+
 @mcp.tool()
 def update_individual_withholding(
     practice_id: str,
@@ -712,15 +1546,40 @@ def update_individual_withholding(
     federal_withholding_1042s: Optional[float] = None,
     tax_withheld_1099: Optional[float] = None,
 ) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update withholding / taxes withheld amounts for an individual.
+
+    Updates (individual table):
+        - federal_withholding_w2
+        - federal_withholding_1042s
+        - tax_withheld_1099
+
+    Args:
+        practice_id (str): internal_data.practice_id for the client.
+        reference (str): must be "individual".
+        federal_withholding_w2 (float | None)
+        federal_withholding_1042s (float | None)
+        tax_withheld_1099 (float | None)
+
+    Returns:
+        dict with only updated values under `updated`.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
 
     table, pk_col = _get_table_and_pk("individual")
 
     with get_connection() as conn:
         rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
         if not rid:
-            return {"success": False}
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
 
-        fields = {}
+        fields: Dict[str, Any] = {}
         if federal_withholding_w2 is not None:
             fields["federal_withholding_w2"] = federal_withholding_w2
         if federal_withholding_1042s is not None:
@@ -730,16 +1589,17 @@ def update_individual_withholding(
 
         built = _build_update_query(table, pk_col, rid, fields)
         if not built:
-            return {"success": False}
-
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
         q, p = built
         cur = conn.cursor()
         cur.execute(q, p)
         conn.commit()
 
-        return {"success": True, "updated_fields": list(fields.keys())}
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
 
-# update Forms Availability Flags
 @mcp.tool()
 def update_individual_forms_flags(
     practice_id: str,
@@ -749,106 +1609,303 @@ def update_individual_forms_flags(
     has_1099: Optional[str] = None,
     has_k1: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update which tax forms the individual has available.
+
+    Updates (individual table):
+        - has_w2
+        - has_1042s
+        - has_1099
+        - has_k1
+
+    Args:
+        practice_id (str): internal_data.practice_id for the client.
+        reference (str): must be "individual".
+        has_w2 / has_1042s / has_1099 / has_k1 (str | None): 'y' or 'n'
+
+    Returns:
+        dict with only updated values under `updated`.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
 
     table, pk_col = _get_table_and_pk("individual")
 
     with get_connection() as conn:
         rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
         if not rid:
-            return {"success": False}
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
 
-        fields = {}
-        for k, v in {
-            "has_w2": has_w2,
-            "has_1042s": has_1042s,
-            "has_1099": has_1099,
-            "has_k1": has_k1,
-        }.items():
-            if v is not None:
-                fields[k] = v
-
-        built = _build_update_query(table, pk_col, rid, fields)
-        if not built:
-            return {"success": False}
-
-        q, p = built
-        c = conn.cursor()
-        c.execute(q, p)
-        conn.commit()
-
-        return {"success": True, "updated_fields": list(fields.keys())}
-
-# update Itemized Deductions & Education
-@mcp.tool()
-def update_individual_deductions_and_education(
-    practice_id: str,
-    reference: str,
-    itemized_state_local_tax: Optional[float] = None,
-    itemized_charity: Optional[float] = None,
-    itemized_casualty_losses: Optional[float] = None,
-    education_expenses: Optional[float] = None,
-    student_loan_interest: Optional[float] = None,
-    dependents_count: Optional[int] = None,
-) -> Dict[str, Any]:
-
-    table, pk_col = _get_table_and_pk("individual")
-
-    with get_connection() as conn:
-        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
-        if not rid:
-            return {"success": False}
-
-        fields = {
-            k: v for k, v in locals().items()
-            if k not in ["practice_id", "reference"] and v is not None
-        }
+        fields: Dict[str, Any] = {}
+        if has_w2 is not None:
+            fields["has_w2"] = has_w2
+        if has_1042s is not None:
+            fields["has_1042s"] = has_1042s
+        if has_1099 is not None:
+            fields["has_1099"] = has_1099
+        if has_k1 is not None:
+            fields["has_k1"] = has_k1
 
         built = _build_update_query(table, pk_col, rid, fields)
         if not built:
-            return {"success": False}
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
 
         q, p = built
         cur = conn.cursor()
         cur.execute(q, p)
         conn.commit()
 
-        return {"success": True, "updated_fields": list(fields.keys())}
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
 
-# update Refund & Bank Details
+
 @mcp.tool()
-def update_individual_refund_details(
+def update_individual_itemized_deductions(
     practice_id: str,
     reference: str,
-    refund_method: Optional[str] = None,
-    bank_routing: Optional[str] = None,
-    bank_account_last4: Optional[str] = None,
+    itemized_state_local_tax: Optional[float] = None,
+    itemized_charity: Optional[float] = None,
+    itemized_casualty_losses: Optional[float] = None,
 ) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update itemized deduction amounts for an individual.
+
+    Updates (individual table):
+        - itemized_state_local_tax
+        - itemized_charity
+        - itemized_casualty_losses
+
+    Args:
+        practice_id (str), reference (str)
+        itemized_state_local_tax (float | None)
+        itemized_charity (float | None)
+        itemized_casualty_losses (float | None)
+
+    Returns:
+        dict with updated values only.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
 
     table, pk_col = _get_table_and_pk("individual")
 
     with get_connection() as conn:
         rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
         if not rid:
-            return {"success": False}
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
 
-        fields = {}
-        if refund_method is not None:
-            fields["refund_method"] = refund_method
-        if bank_routing is not None:
-            fields["bank_routing"] = bank_routing
-        if bank_account_last4 is not None:
-            fields["bank_account_last4"] = bank_account_last4[-4:]
+        fields: Dict[str, Any] = {}
+        if itemized_state_local_tax is not None:
+            fields["itemized_state_local_tax"] = itemized_state_local_tax
+        if itemized_charity is not None:
+            fields["itemized_charity"] = itemized_charity
+        if itemized_casualty_losses is not None:
+            fields["itemized_casualty_losses"] = itemized_casualty_losses
 
         built = _build_update_query(table, pk_col, rid, fields)
         if not built:
-            return {"success": False}
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
 
         q, p = built
-        c = conn.cursor()
-        c.execute(q, p)
+        cur = conn.cursor()
+        cur.execute(q, p)
         conn.commit()
 
-        return {"success": True, "updated_fields": list(fields.keys())}
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
+
+@mcp.tool()
+def update_individual_education_and_dependents(
+    practice_id: str,
+    reference: str,
+    education_expenses: Optional[float] = None,
+    student_loan_interest: Optional[float] = None,
+    dependents_count: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update education-related amounts and dependents count for an individual.
+
+    Updates (individual table):
+        - education_expenses
+        - student_loan_interest
+        - dependents_count
+
+    Args:
+        practice_id (str), reference (str)
+        education_expenses (float | None)
+        student_loan_interest (float | None)
+        dependents_count (int | None)
+
+    Returns:
+        dict with updated values only.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not rid:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
+
+        fields: Dict[str, Any] = {}
+        if education_expenses is not None:
+            fields["education_expenses"] = education_expenses
+        if student_loan_interest is not None:
+            fields["student_loan_interest"] = student_loan_interest
+        if dependents_count is not None:
+            fields["dependents_count"] = dependents_count
+
+        built = _build_update_query(table, pk_col, rid, fields)
+        if not built:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
+
+
+@mcp.tool()
+def update_individual_refund_method(
+    practice_id: str,
+    reference: str,
+    refund_method: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update the refund method for an individual.
+
+    Updates (individual table):
+        - refund_method
+
+    Args:
+        practice_id (str), reference (str)
+        refund_method (str | None): 'check' or 'ACH'
+
+    Returns:
+        dict with updated values only.
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not rid:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
+
+        fields: Dict[str, Any] = {}
+        if refund_method is not None:
+            fields["refund_method"] = refund_method
+
+        built = _build_update_query(table, pk_col, rid, fields)
+        if not built:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
+
+
+@mcp.tool()
+def update_individual_bank_details(
+    practice_id: str,
+    reference: str,
+    bank_routing: Optional[str] = None,
+    bank_account_last4: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Purpose:
+        Update bank details used for refund via ACH.
+        Stores only last 4 digits for account number (safety).
+
+    Updates (individual table):
+        - bank_routing
+        - bank_account_last4
+
+    Args:
+        practice_id (str), reference (str)
+        bank_routing (str | None): bank routing number (string).
+        bank_account_last4 (str | None): last 4 digits or full account number; we store only last 4.
+
+    Returns:
+        dict with updated values only (last4 stored).
+    """
+    if (reference or "").lower().strip() != "individual":
+        return {"reference": reference, "practice_id": practice_id, "reference_id": None,
+                "success": False, "rows_affected": 0, "updated": {},
+                "message": "Only supports reference='individual'."}
+
+    table, pk_col = _get_table_and_pk("individual")
+
+    with get_connection() as conn:
+        rid = _resolve_reference_id_from_practice(conn, practice_id, "individual")
+        if not rid:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": None,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "Client not found for this practice_id."}
+
+        fields: Dict[str, Any] = {}
+
+        if bank_routing is not None:
+            fields["bank_routing"] = bank_routing
+
+        if bank_account_last4 is not None:
+            s = str(bank_account_last4).strip()
+            fields["bank_account_last4"] = s[-4:] if len(s) >= 4 else s
+
+        built = _build_update_query(table, pk_col, rid, fields)
+        if not built:
+            return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                    "success": False, "rows_affected": 0, "updated": {},
+                    "message": "No fields provided to update."}
+
+        q, p = built
+        cur = conn.cursor()
+        cur.execute(q, p)
+        conn.commit()
+
+        return {"reference": "individual", "practice_id": practice_id, "reference_id": rid,
+                "success": cur.rowcount > 0, "rows_affected": cur.rowcount, "updated": fields}
+
+
 
 
 if __name__ == "__main__":
