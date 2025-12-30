@@ -278,13 +278,13 @@ def get_client_itin_number(practice_id: str, reference: str) -> Optional[Dict[st
     """
     Purpose:
         Fetch ONLY the ITIN number (if present) for an individual client.
-
+ 
     Args:
         practice_id (str):
             internal_data.practice_id.
         reference (str):
             Must be "individual".
-
+ 
     Returns:
         dict | None:
             {
@@ -292,29 +292,38 @@ def get_client_itin_number(practice_id: str, reference: str) -> Optional[Dict[st
               "practice_id": "<practice_id>",
               "itin": "<str|None>"
             }
-            None if not found / not ITIN / reference != "individual".
+            None if not found or reference != "individual".
     """
     ref_type = (reference or "").lower().strip()
     if ref_type != "individual":
         return None
-
+ 
     table, pk_col = _get_table_and_pk(ref_type)
+ 
     with get_connection() as conn:
         rid = _resolve_reference_id_from_practice(conn, practice_id, ref_type)
         if rid is None:
             return None
-
+ 
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
-            f"SELECT ssn_itin_type, ssn_itin FROM {table} WHERE {pk_col} = %s LIMIT 1",
+            f"""
+            SELECT ssn_itin
+            FROM {table}
+            WHERE {pk_col} = %s
+            LIMIT 1
+            """,
             (rid,),
         )
         row = cursor.fetchone()
         if not row:
             return None
-
-        t = (row.get("ssn_itin_type") or "").strip().upper()
-        return {"reference": ref_type, "practice_id": practice_id, "itin": row.get("ssn_itin") if t == "ITIN" else None}
+ 
+        return {
+            "reference": ref_type,
+            "practice_id": practice_id,
+            "itin": row.get("ssn_itin"),
+        }
 
 
 # NEW 1040-NR (individual)
