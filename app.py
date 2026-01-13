@@ -9,6 +9,7 @@ from typing import Optional
 from process import TaxProcessingWorkflow
 # Import the function from mcp_functions
 from welcome_message import get_client_welcome_message
+from sub_client import get_individual_associated_clients
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +41,10 @@ class TaxWorkflowRequest(BaseModel):
 class WelcomeMessageRequest(BaseModel):
     user_id: str
     client_id: str  # str primary key
+    reference: str  # "company" or "individual"
+
+class subclient(BaseModel):
+    sub_client_id: str  # str primary key
     reference: str  # "company" or "individual"
 
 @app.post("/tax/workflow")
@@ -174,6 +179,41 @@ async def get_welcome_message_endpoint(request: WelcomeMessageRequest):
         logger.error(f"Error processing welcome message: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing welcome message: {str(e)}")
 
+@app.post("/sub/client")
+async def get_sub_client_endpoint(request: subclient):
+    """
+    Get the welcome message for a client
+    """
+    try:
+        logger.info(f"Received welcome message request for user {request.sub_client_id}, client_id {request.reference}")
+
+        if not request.sub_client_id:
+            raise HTTPException(status_code=400, detail="Sub Client ID cannot be empty")
+
+        if not request.reference or request.reference.strip() == "":
+            raise HTTPException(status_code=400, detail="Reference cannot be empty")
+
+        if request.reference.lower() not in ["company", "individual"]:
+            raise HTTPException(status_code=400, detail="Reference must be 'company' or 'individual'")
+
+        # Get the welcome message
+        subclient_details = get_individual_associated_clients(
+            practice_id=request.sub_client_id,
+            reference=request.reference.lower()
+        )
+
+        logger.info(f"Successfully processed welcome message for user {request.sub_client_id}")
+        return {
+            "response": subclient_details,
+            "status_code": 200,
+            "timestamp": time.time(),
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error processing welcome message: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing welcome message: {str(e)}")
+
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
@@ -198,7 +238,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-        port=8000,
+        port=8002,
         reload=True,
         log_level="info"
     )
