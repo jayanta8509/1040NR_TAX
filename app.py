@@ -60,6 +60,7 @@ async def tax_workflow_endpoint(request: TaxWorkflowRequest):
     **Subsequent Calls (Process Answers):**
     - Set human_response = user's answer
     - Validates the answer using validation_identification
+    - If off-topic: Returns standard message and repeats question
     - If validation = True (wants update): Asks human_response as question
     - If validation = False (confirmed): Moves to next question
     - Returns next question or completion status
@@ -120,13 +121,16 @@ async def tax_workflow_endpoint(request: TaxWorkflowRequest):
                 "timestamp": time.time()
             }
         
-        # Return current question
+        # Return current question (handles both in_progress and off_topic)
+        # For off_topic, the message is in result.get("message") and needs to go in ai_response
+        ai_response = result.get("message") if result.get("status") == "off_topic" else result.get("ai_response")
+        
         return {
             "status": result.get("status"),
             "question_number": result.get("question_number"),
             "total_questions": result.get("total_questions"),
             "question": result.get("question"),
-            "ai_response": result.get("ai_response"),
+            "ai_response": ai_response,
             "completed": result.get("completed", 0),
             "validation_result": result.get("validation_result"),  # True = wants update, False = confirmed, None = first question
             "timestamp": time.time()
@@ -159,8 +163,6 @@ async def get_welcome_message_endpoint(request: WelcomeMessageRequest):
         if request.reference.lower() not in ["company", "individual"]:
             raise HTTPException(status_code=400, detail="Reference must be 'company' or 'individual'")
 
-
-
         # Get the welcome message
         welcome_message = get_client_welcome_message(
             client_id=request.client_id,
@@ -182,10 +184,10 @@ async def get_welcome_message_endpoint(request: WelcomeMessageRequest):
 @app.post("/sub/client")
 async def get_sub_client_endpoint(request: subclient):
     """
-    Get the welcome message for a client
+    Get the sub-client details
     """
     try:
-        logger.info(f"Received welcome message request for user {request.sub_client_id}, client_id {request.reference}")
+        logger.info(f"Received sub-client request for {request.sub_client_id}, reference {request.reference}")
 
         if not request.sub_client_id:
             raise HTTPException(status_code=400, detail="Sub Client ID cannot be empty")
@@ -196,13 +198,13 @@ async def get_sub_client_endpoint(request: subclient):
         if request.reference.lower() not in ["company", "individual"]:
             raise HTTPException(status_code=400, detail="Reference must be 'company' or 'individual'")
 
-        # Get the welcome message
+        # Get the sub-client details
         subclient_details = get_individual_associated_clients(
             practice_id=request.sub_client_id,
             reference=request.reference.lower()
         )
 
-        logger.info(f"Successfully processed welcome message for user {request.sub_client_id}")
+        logger.info(f"Successfully processed sub-client for {request.sub_client_id}")
         return {
             "response": subclient_details,
             "status_code": 200,
@@ -211,8 +213,8 @@ async def get_sub_client_endpoint(request: subclient):
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"Error processing welcome message: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error processing welcome message: {str(e)}")
+        logger.error(f"Error processing sub-client: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing sub-client: {str(e)}")
 
 @app.get("/")
 async def root():
@@ -221,7 +223,7 @@ async def root():
         "message": "Tax Filing Assistant API",
         "version": "2.0.0",
         "endpoint": "POST /tax/workflow",
-        "description": "Single endpoint for complete tax filing workflow with intelligent validation"
+        "description": "Single endpoint for complete tax filing workflow with intelligent validation and off-topic detection"
     }
 
 

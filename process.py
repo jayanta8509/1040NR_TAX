@@ -12,7 +12,7 @@ class TaxProcessingWorkflow:
     Manages the tax filing workflow:
     1. Generate questions and save to JSON
     2. Process questions step-by-step
-    3. Validate user responses
+    3. Validate user responses (including off-topic detection)
     4. Track progress per user
     """
     
@@ -103,7 +103,29 @@ class TaxProcessingWorkflow:
             is_last_question = (current_index == len(questions))
             
             if is_last_question:
-                # For the last question, just process the answer without validation
+                # For the last question, validate with off-topic check
+                print(f"🔍 Validating final answer (checking for off-topic)...")
+                validation_result = await validation_identification(
+                    Question=prev_question,
+                    AI_agent_rsponce=prev_ai_response,
+                    human_responce=human_response
+                )
+                
+                # NEW: Check if response is off-topic
+                if not validation_result.is_tax_related:
+                    print(f"⚠️ Off-topic response detected on final question")
+                    return {
+                        "status": "off_topic",
+                        "message": "Sorry, I'm here to assist you specifically with the 1040-NR Nonresident Tax Return.",
+                        "question_number": current_index,
+                        "total_questions": len(questions),
+                        "question": prev_question,  # Repeat the same question
+                        "ai_response": prev_ai_response,  # Keep the AI's previous response
+                        "completed": len(progress["completed_questions"]),
+                        "validation_result": None
+                    }
+                
+                # Process final answer (tax-related)
                 print(f"📝 Processing final answer for last question...")
                 
                 # Save the answer
@@ -150,11 +172,27 @@ class TaxProcessingWorkflow:
                     human_responce=human_response
                 )
                 
+                # NEW: Check if response is off-topic FIRST
+                if not validation_result.is_tax_related:
+                    print(f"⚠️ Off-topic response detected")
+                    # Don't save answer, don't increment, just return message and repeat question
+                    return {
+                        "status": "off_topic",
+                        "message": "Sorry, I'm here to assist you specifically with the 1040-NR Nonresident Tax Return.",
+                        "question_number": current_index,
+                        "total_questions": len(questions),
+                        "question": prev_question,  # Repeat the same question
+                        "ai_response": prev_ai_response,  # Keep the AI's previous response
+                        "completed": len(progress["completed_questions"]),
+                        "validation_result": None  # No validation happened
+                    }
+                
+                # Response is tax-related, check if user wants to update
                 wants_to_update = validation_result.validation_indenty
                 validation_wants_update = wants_to_update
                 print(f"📊 Validation result: {'UPDATE' if wants_to_update else 'KEEP'}")
                 
-                # Save the answer
+                # Save the answer (only if tax-related)
                 if "answers" not in progress:
                     progress["answers"] = {}
                 
@@ -375,6 +413,10 @@ if __name__ == "__main__":
             print(f"📝 Next Question: {result.get('question', '')}")
             print(f"🤖 AI Response: {result.get('ai_response', '')}")
             print(f"📊 Progress: {result['completed']}/{result['total_questions']} completed")
+        elif result['status'] == 'off_topic':
+            print(f"\n⚠️ Status: {result['status']}")
+            print(f"💬 Message: {result.get('message', '')}")
+            print(f"📝 Same Question: {result.get('question', '')}")
         else:
             print(f"\n🎉 {result.get('message', 'Workflow completed!')}")
         
