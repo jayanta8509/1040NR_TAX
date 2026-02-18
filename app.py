@@ -123,14 +123,21 @@ async def tax_workflow_endpoint(request: TaxWorkflowRequest):
         
         # Return current question (handles both in_progress and off_topic)
         # For off_topic, the message is in result.get("message") and needs to go in ai_response
-        ai_response = result.get("message") if result.get("status") == "off_topic" else result.get("ai_response")
+        # ai_response = result.get("message") if result.get("status") == "off_topic" else result.get("ai_response")
+        if result.get("status") == "off_topic":
+            return {
+                "status": "off_topic",
+                "status_code": 201,
+                "result": result.get("result", result.get("message", "Sorry, I'm here to assist you specifically with the 1040-NR Nonresident Tax Return."))
+            }
         
         return {
             "status": result.get("status"),
+            "status_code": 200,
             "question_number": result.get("question_number"),
             "total_questions": result.get("total_questions"),
             "question": result.get("question"),
-            "ai_response": ai_response,
+            "ai_response": result.get("ai_response"),
             "completed": result.get("completed", 0),
             "validation_result": result.get("validation_result"),  # True = wants update, False = confirmed, None = first question
             "timestamp": time.time()
