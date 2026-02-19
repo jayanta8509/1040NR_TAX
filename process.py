@@ -171,69 +171,76 @@ class TaxProcessingWorkflow:
                     AI_agent_rsponce=prev_ai_response,
                     human_responce=human_response
                 )
-                
-                # NEW: Check if response is off-topic FIRST
-                if not validation_result.is_tax_related:
-                    print(f"⚠️ Off-topic response detected")
-                    # Don't save answer, don't increment, just return message and repeat question
-                    return {
-                        "status": "off_topic",
-                        "message": "Sorry, I'm here to assist you specifically with the 1040-NR Nonresident Tax Return.",
-                        "question_number": current_index,
-                        "total_questions": len(questions),
-                        "question": prev_question,  # Repeat the same question
-                        "ai_response": prev_ai_response,  # Keep the AI's previous response
-                        "completed": len(progress["completed_questions"]),
-                        "validation_result": None  # No validation happened
-                    }
-                
-                # Response is tax-related, check if user wants to update
-                wants_to_update = validation_result.validation_indenty
-                validation_wants_update = wants_to_update
-                print(f"📊 Validation result: {'UPDATE' if wants_to_update else 'KEEP'}")
-                
-                # Save the answer (only if tax-related)
-                if "answers" not in progress:
-                    progress["answers"] = {}
-                
-                progress["answers"][f"question_{current_index - 1}"] = {
-                    "question": prev_question,
-                    "ai_response": prev_ai_response,
-                    "human_response": human_response,
-                    "wants_update": wants_to_update,
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-                if wants_to_update:
-                    # User wants to update, ask the human_response as a question
-                    print(f"🔄 User wants to update information, asking human response as question")
-                    
-                    ai_response = await ask_question(
-                        question=human_response,  # Ask the human response as the question
-                        user_id=self.user_id,
-                        client_id=self.client_id,
-                        reference=self.reference
-                    )
-                    
-                    # Save the AI response but don't increment question index
-                    progress["last_ai_response"] = ai_response
-                    self.save_progress(progress)
-                    
-                    return {
-                        "status": "in_progress",
-                        "question_number": current_index,  # Same question number
-                        "total_questions": len(questions),
-                        "question": human_response,  # The human response becomes the question
-                        "ai_response": ai_response,
-                        "completed": len(progress["completed_questions"]),
-                        "validation_result": True  # User wants to update
-                    }
-                else:
-                    # User confirmed, mark as completed and move to next
+
+                # Check if user wants to SKIP to next question
+                if validation_result.wants_to_skip:
+                    print(f"⏭️ User wants to skip to next question")
+                    # Mark current question as completed and move to next
                     if current_index - 1 not in progress["completed_questions"]:
                         progress["completed_questions"].append(current_index - 1)
-                    # Move to next question
+                    progress["current_question_index"] = current_index + 1
+                    self.save_progress(progress)
+
+                    # Move to next question (continue in loop)
                     current_index = progress.get("current_question_index", 0)
+
+                # Check if response is off-topic (not tax-related and not skip)
+                elif not validation_result.is_tax_related:
+                    print(f"⚠️ Off-topic response detected")
+                    return {
+                        "status": "off_topic",
+                        "result": "Sorry, I'm here to assist you specifically with the 1040-NR Nonresident Tax Return."
+                    }
+
+                # Response is tax-related, process validation
+                else:
+                    wants_to_update = validation_result.validation_indenty
+                    validation_wants_update = wants_to_update
+                    print(f"📊 Validation result: {'UPDATE' if wants_to_update else 'KEEP'}")
+
+                    # Save the answer (only if tax-related)
+                    if "answers" not in progress:
+                        progress["answers"] = {}
+
+                    progress["answers"][f"question_{current_index - 1}"] = {
+                        "question": prev_question,
+                        "ai_response": prev_ai_response,
+                        "human_response": human_response,
+                        "wants_update": wants_to_update,
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+                    if wants_to_update:
+                        # User wants to update, ask the human_response as a question
+                        print(f"🔄 User wants to update information, asking human response as question")
+
+                        ai_response = await ask_question(
+                            question=human_response,  # Ask the human response as the question
+                            user_id=self.user_id,
+                            client_id=self.client_id,
+                            reference=self.reference
+                        )
+
+                        # Save the AI response but don't increment question index
+                        progress["last_ai_response"] = ai_response
+                        self.save_progress(progress)
+
+                        return {
+                            "status": "in_progress",
+                            "question_number": current_index,  # Same question number
+                            "total_questions": len(questions),
+                            "question": human_response,  # The human response becomes the question
+                            "ai_response": ai_response,
+                            "completed": len(progress["completed_questions"]),
+                            "validation_result": True  # User wants to update
+                        }
+                    else:
+                        # User confirmed, mark as completed and move to next
+                        if current_index - 1 not in progress["completed_questions"]:
+                            progress["completed_questions"].append(current_index - 1)
+                        progress["current_question_index"] = current_index + 1
+                        self.save_progress(progress)
+                        current_index = progress.get("current_question_index", 0)
         
         # Check if all questions are completed (shouldn't reach here after last question)
         if current_index >= len(questions):

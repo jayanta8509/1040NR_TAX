@@ -10,8 +10,9 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 class validation(BaseModel):
-    is_tax_related: bool  # NEW: Is the response related to tax/1040NR?
-    validation_indenty: bool  # EXISTING: Does user want to update?
+    is_tax_related: bool  # Is the response related to tax/1040NR?
+    wants_to_skip: bool  # Does user want to skip to next question? (next, next question, skip)
+    validation_indenty: bool  # Does user want to update? (only relevant if is_tax_related = True)
 
 
 model = ChatOpenAI(
@@ -29,7 +30,7 @@ You will receive three pieces of information:
 2. **AI_agent_response**: The AI's response or confirmation request based on existing data
 3. **Human_response**: The user's actual response to the AI
 
-Your task is to perform TWO checks:
+Your task is to perform THREE checks:
 
 **CHECK 1: Is the response tax-related? (is_tax_related)**
 Determine if the human's response is related to:
@@ -48,6 +49,7 @@ SET is_tax_related = False when human response is about:
 - Personal chat (how are you, tell me about yourself)
 - Homework, school subjects
 - Travel, shopping, hobbies
+- Skip/navigation requests like "next", "next question", "skip", "go ahead", "move on"
 - ANY topic completely unrelated to tax filing
 
 SET is_tax_related = True when:
@@ -57,8 +59,20 @@ SET is_tax_related = True when:
 - Response provides tax-related data
 - Response is about updating tax information
 
-**CHECK 2: Does user want to update? (validation_indenty)**
-Only perform this check if is_tax_related = True.
+**CHECK 2: Does user want to skip? (wants_to_skip)**
+Check if the user is requesting to skip to the next question.
+
+SET wants_to_skip = True when:
+- User says "next", "next question", "next please"
+- User says "skip", "skip this", "skip this question"
+- User says "go ahead", "move on", "continue"
+- User explicitly asks to go to the next question
+
+SET wants_to_skip = False when:
+- User provides any other response (including tax-related answers or off-topic chat)
+
+**CHECK 3: Does user want to update? (validation_indenty)**
+Only perform this check if is_tax_related = True AND wants_to_skip = False.
 
 SET validation_indenty = True (User wants to UPDATE) when:
 - User explicitly says they want to change/update/modify the information
@@ -76,14 +90,17 @@ SET validation_indenty = False (User wants to KEEP existing) when:
 - User's response doesn't contain any new or different information
 
 **Important Context Analysis Rules:**
-1. ALWAYS check is_tax_related FIRST before checking validation_indenty
-2. If is_tax_related = False, set validation_indenty = False (doesn't matter)
-3. Always consider what the AI_agent_response is asking or confirming
-4. Compare the human_response against what the AI mentioned
-5. Look for contradictions or new information in the human_response
-6. Pay attention to negation words (no, not, incorrect) followed by corrections
-7. Consider the semantic meaning, not just keywords
-8. If the user provides specific new data, they want to update
+1. ALWAYS check wants_to_skip FIRST - if user wants to skip, set wants_to_skip = True
+2. Then check is_tax_related - is the response about tax or completely unrelated?
+3. Only check validation_indenty if is_tax_related = True AND wants_to_skip = False
+4. If wants_to_skip = True, set is_tax_related = False and validation_indenty = False
+5. If is_tax_related = False (and not skipping), set validation_indenty = False (doesn't matter)
+6. Always consider what the AI_agent_response is asking or confirming
+7. Compare the human_response against what the AI mentioned
+8. Look for contradictions or new information in the human_response
+9. Pay attention to negation words (no, not, incorrect) followed by corrections
+10. Consider the semantic meaning, not just keywords
+11. If the user provides specific new data, they want to update
 
 **Examples:**
 
@@ -92,6 +109,7 @@ Question: "What is your full name?"
 AI_agent_response: "I see you already provided 'Alex test.' Is 'Alex test' your full legal name?"
 Human_response: "What's the weather today?"
 → is_tax_related = False (completely unrelated to tax)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = False (doesn't matter)
 
 Example 2: OFF-TOPIC
@@ -99,6 +117,7 @@ Question: "What is your date of birth?"
 AI_agent_response: "Your date of birth is listed as 01/15/1990. Is this correct?"
 Human_response: "Tell me a joke"
 → is_tax_related = False (not about tax)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = False (doesn't matter)
 
 Example 3: TAX-RELATED, WANTS UPDATE
@@ -106,6 +125,7 @@ Question: "What is your full name?"
 AI_agent_response: "I see you already provided 'Alex test.' Is 'Alex test' your full legal name?"
 Human_response: "no i want to change my name it should be 'Alex Jackson'"
 → is_tax_related = True (responding to tax question)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = True (User explicitly wants to change and provides new name)
 
 Example 4: TAX-RELATED, KEEP EXISTING
@@ -113,6 +133,7 @@ Question: "What is your date of birth?"
 AI_agent_response: "Your date of birth is listed as 01/15/1990. Is this correct?"
 Human_response: "yes, that's correct"
 → is_tax_related = True (responding to tax question)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = False (User confirms existing information)
 
 Example 5: TAX-RELATED, WANTS UPDATE
@@ -120,6 +141,7 @@ Question: "Do you have an ITIN?"
 AI_agent_response: "I see you indicated 'Yes' for having an ITIN. Is this still accurate?"
 Human_response: "no, I don't have one"
 → is_tax_related = True (responding to tax question)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = True (User is changing from Yes to No)
 
 Example 6: TAX-RELATED, WANTS UPDATE
@@ -127,6 +149,7 @@ Question: "What is your email address?"
 AI_agent_response: "Your email is john@example.com. Should we keep this?"
 Human_response: "actually it's john.doe@example.com"
 → is_tax_related = True (responding to tax question)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = True (User provides corrected email)
 
 Example 7: TAX-RELATED, KEEP EXISTING
@@ -134,6 +157,7 @@ Question: "What is your phone number?"
 AI_agent_response: "We have your phone as (555) 123-4567. Is this still current?"
 Human_response: "yes"
 → is_tax_related = True (responding to tax question)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = False (User confirms existing data)
 
 Example 8: OFF-TOPIC
@@ -141,11 +165,29 @@ Question: "What are your W-2 wages?"
 AI_agent_response: "I don't have your W-2 wage information. What amount was reported on your W-2?"
 Human_response: "How do I cook pasta?"
 → is_tax_related = False (completely unrelated)
+→ wants_to_skip = False (not a skip request)
 → validation_indenty = False (doesn't matter)
 
-Analyze the context carefully and return BOTH boolean values:
+Example 9: SKIP REQUEST
+Question: "What is your full legal name?"
+AI_agent_response: "I see you already provided 'Alex test.' Is 'Alex test' your full legal name?"
+Human_response: "next question"
+→ is_tax_related = False (not answering the question)
+→ wants_to_skip = True (user wants to skip)
+→ validation_indenty = False (doesn't matter)
+
+Example 10: SKIP REQUEST
+Question: "What is your date of birth?"
+AI_agent_response: "Your date of birth is listed as 01/15/1990. Is this correct?"
+Human_response: "next"
+→ is_tax_related = False (not providing tax information)
+→ wants_to_skip = True (user wants to skip)
+→ validation_indenty = False (doesn't matter)
+
+Analyze the context carefully and return ALL THREE boolean values:
 - is_tax_related: Is the human response about tax/1040NR?
-- validation_indenty: Does user want to update? (only relevant if is_tax_related = True)
+- wants_to_skip: Does user want to skip to next question?
+- validation_indenty: Does user want to update? (only relevant if is_tax_related = True AND wants_to_skip = False)
 """)
 
 
